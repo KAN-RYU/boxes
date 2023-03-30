@@ -1,0 +1,3518 @@
+{
+  "XmlUI": "",
+  "LuaScript": "-- Utility memory bag by Directsun\r\n-- Version 2.5.2\r\n-- Fork of Memory Bag 2.0 by MrStump\r\n\r\nfunction updateSave()\r\n    local data_to_save = {[\"ml\"]=memoryList}\r\n    saved_data = JSON.encode(data_to_save)\r\n    self.script_state = saved_data\r\nend\r\n\r\nfunction combineMemoryFromBagsWithin()\r\n  local bagObjList = self.getObjects()\r\n  for _, bagObj in ipairs(bagObjList) do\r\n    local data = bagObj.lua_script_state\r\n      if data ~= nil then\r\n        local j = JSON.decode(data)\r\n        if j ~= nil and j.ml ~= nil then\r\n          for guid, entry in pairs(j.ml) do\r\n            memoryList[guid] = entry\r\n          end\r\n        end\r\n      end\r\n    end\r\nend\r\n\r\nfunction updateMemoryWithMoves()\r\n    memoryList = memoryListBackup\r\n    --get the first transposed object's coordinates\r\n    local obj = getObjectFromGUID(moveGuid)\r\n\r\n    -- p1 is where needs to go, p2 is where it was\r\n    local refObjPos = memoryList[moveGuid].pos\r\n    local deltaPos = findOffsetDistance(obj.getPosition(), refObjPos, nil)\r\n    local movedRotation = obj.getRotation()\r\n    for guid, entry in pairs(memoryList) do\r\n        memoryList[guid].pos.x = entry.pos.x - deltaPos.x\r\n        memoryList[guid].pos.y = entry.pos.y - deltaPos.y\r\n        memoryList[guid].pos.z = entry.pos.z - deltaPos.z\r\n        -- memoryList[guid].rot.x = movedRotation.x\r\n        -- memoryList[guid].rot.y = movedRotation.y\r\n        -- memoryList[guid].rot.z = movedRotation.z\r\n    end\r\n\r\n    --theList[obj.getGUID()] = {\r\n    --    pos={x=round(pos.x,4), y=round(pos.y,4), z=round(pos.z,4)},\r\n    --    rot={x=round(rot.x,4), y=round(rot.y,4), z=round(rot.z,4)},\r\n    --    lock=obj.getLock()\r\n    --}\r\n    moveList = {}\r\nend\r\n\r\nfunction onload(saved_data)\r\n    fresh = true\r\n    if saved_data ~= \"\" then\r\n        local loaded_data = JSON.decode(saved_data)\r\n        --Set up information off of loaded_data\r\n        memoryList = loaded_data.ml\r\n    else\r\n        --Set up information for if there is no saved saved data\r\n        memoryList = {}\r\n    end\r\n\r\n    moveList = {}\r\n    moveGuid = nil\r\n\r\n    if next(memoryList) == nil then\r\n        createSetupButton()\r\n    else\r\n        fresh = false\r\n        createMemoryActionButtons()\r\n    end\r\nend\r\n\r\n\r\n--Beginning Setup\r\n\r\n\r\n--Make setup button\r\nfunction createSetupButton()\r\n    self.createButton({\r\n        label=\"Setup\", click_function=\"buttonClick_setup\", function_owner=self,\r\n        position={0,0.1,-2.1}, rotation={0,0,0}, height=220, width=500,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\nend\r\n\r\n--Triggered by Transpose button\r\nfunction buttonClick_transpose()\r\n    moveGuid = nil\r\n    broadcastToAll(\"Select one object and move it- all objects will move relative to the new location\", {0.75, 0.75, 1})\r\n    memoryListBackup = duplicateTable(memoryList)\r\n    memoryList = {}\r\n    moveList = {}\r\n    self.clearButtons()\r\n    createButtonsOnAllObjects(true)\r\n    createSetupActionButtons(true)\r\nend\r\n\r\n--Triggered by setup button,\r\nfunction buttonClick_setup()\r\n    memoryListBackup = duplicateTable(memoryList)\r\n    memoryList = {}\r\n    self.clearButtons()\r\n    createButtonsOnAllObjects(false)\r\n    createSetupActionButtons(false)\r\nend\r\n\r\nfunction getAllObjectsInMemory()\r\n  local objTable = {}\r\n  local curObj = {}\r\n\r\n  for guid in pairs(memoryListBackup) do\r\n    curObj = getObjectFromGUID(guid)\r\n    table.insert(objTable, curObj)\r\n  end\r\n\r\n  return objTable\r\n  -- return getAllObjects()\r\nend\r\n\r\n--Creates selection buttons on objects\r\nfunction createButtonsOnAllObjects(move)\r\n    local howManyButtons = 0\r\n\r\n    local objsToHaveButtons = {}\r\n    if move == true then\r\n      objsToHaveButtons = getAllObjectsInMemory()\r\n    else\r\n      objsToHaveButtons = getAllObjects()\r\n    end\r\n\r\n    for _, obj in ipairs(objsToHaveButtons) do\r\n        if obj ~= self then\r\n            local dummyIndex = howManyButtons\r\n            --On a normal bag, the button positions aren't the same size as the bag.\r\n            globalScaleFactor = 1 * 1/self.getScale().x\r\n            --Super sweet math to set button positions\r\n            local selfPos = self.getPosition()\r\n            local objPos = obj.getPosition()\r\n            local deltaPos = findOffsetDistance(selfPos, objPos, obj)\r\n            local objPos = rotateLocalCoordinates(deltaPos, self)\r\n            objPos.x = -objPos.x * globalScaleFactor\r\n            objPos.y = objPos.y * globalScaleFactor + 2\r\n            objPos.z = objPos.z * globalScaleFactor * 0.9\r\n            --Offset rotation of bag\r\n            local rot = self.getRotation()\r\n            rot.y = -rot.y + 180\r\n            --Create function\r\n            local funcName = \"selectButton_\" .. howManyButtons\r\n            local func = function() buttonClick_selection(dummyIndex, obj, move) end\r\n            local color = {0.75,0.25,0.25,0.6}\r\n            local colorMove = {0,0,1,0.6}\r\n            if move == true then\r\n              color = colorMove\r\n            end\r\n            self.setVar(funcName, func)\r\n            self.createButton({\r\n                click_function=funcName, function_owner=self,\r\n                position=objPos, rotation=rot, height=500, width=500,\r\n                color=color,\r\n            })\r\n            howManyButtons = howManyButtons + 1\r\n        end\r\n    end\r\nend\r\n\r\n--Creates submit and cancel buttons\r\nfunction createSetupActionButtons(move)\r\n    self.createButton({\r\n        label=\"Cancel\", click_function=\"buttonClick_cancel\", function_owner=self,\r\n      position={-0.6,0.1,-2.1}, rotation={0,0,0}, height=220, width=550,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\n\r\n    self.createButton({\r\n        label=\"Submit\", click_function=\"buttonClick_submit\", function_owner=self,\r\n        position={-0.6,0.3,-2.5}, rotation={0,0,0}, height=220, width=550,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\n\r\n    if move == false then\r\n      self.createButton({\r\n          label=\"Add\", click_function=\"buttonClick_add\", function_owner=self,\r\n          position={0.6,0.3,-2.1}, rotation={0,0,0}, height=220, width=550,\r\n          font_size=130, color={0,0,0}, font_color={0.25,1,0.25}\r\n      })\r\n\r\n        if fresh == false then\r\n            self.createButton({\r\n                label=\"Set New\", click_function=\"buttonClick_setNew\", function_owner=self,\r\n                position={0.6,0.3,-2.9}, rotation={0,0,0}, height=220, width=550,\r\n                font_size=130, color={0,0,0}, font_color={0.75,0.75,1}\r\n            })\r\n            self.createButton({\r\n                label=\"Remove\", click_function=\"buttonClick_remove\", function_owner=self,\r\n                position={0.6,0.3,-2.5}, rotation={0,0,0}, height=220, width=550,\r\n                font_size=130, color={0,0,0}, font_color={1,0.25,0.25}\r\n            })\r\n        end\r\n    end\r\n\r\n    self.createButton({\r\n        label=\"Reset\", click_function=\"buttonClick_reset\", function_owner=self,\r\n        position={-0.6,0.3,-2.9}, rotation={0,0,0}, height=220, width=550,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\nend\r\n\r\n\r\n--During Setup\r\n\r\n\r\n--Checks or unchecks buttons\r\nfunction buttonClick_selection(index, obj, move)\r\n    local colorMove = {0,0,1,0.6}\r\n    local color = {0,1,0,0.6}\r\n\r\n    previousGuid = selectedGuid\r\n    selectedGuid = obj.getGUID()\r\n\r\n    theList = memoryList\r\n    if move == true then\r\n       theList = moveList\r\n       if previousGuid ~= nil and previousGuid ~= selectedGuid then\r\n         local prevObj = getObjectFromGUID(previousGuid)\r\n         prevObj.highlightOff()\r\n         self.editButton({index=previousIndex, color=colorMove})\r\n         theList[previousGuid] = nil\r\n       end\r\n       previousIndex = index\r\n    end\r\n\r\n    if theList[selectedGuid] == nil then\r\n        self.editButton({index=index, color=color})\r\n        --Adding pos/rot to memory table\r\n        local pos, rot = obj.getPosition(), obj.getRotation()\r\n        --I need to add it like this or it won't save due to indexing issue\r\n        theList[obj.getGUID()] = {\r\n            pos={x=round(pos.x,4), y=round(pos.y,4), z=round(pos.z,4)},\r\n            rot={x=round(rot.x,4), y=round(rot.y,4), z=round(rot.z,4)},\r\n            lock=obj.getLock()\r\n        }\r\n        obj.highlightOn({0,1,0})\r\n    else\r\n      color = {0.75,0.25,0.25,0.6}\r\n      if move == true then\r\n        color = colorMove\r\n      end\r\n        self.editButton({index=index, color=color})\r\n        theList[obj.getGUID()] = nil\r\n        obj.highlightOff()\r\n    end\r\nend\r\n\r\n--Cancels selection process\r\nfunction buttonClick_cancel()\r\n    memoryList = memoryListBackup\r\n    moveList = {}\r\n    self.clearButtons()\r\n    if next(memoryList) == nil then\r\n        createSetupButton()\r\n    else\r\n        createMemoryActionButtons()\r\n    end\r\n    removeAllHighlights()\r\n    broadcastToAll(\"Selection Canceled\", {1,1,1})\r\n    moveGuid = nil\r\nend\r\n\r\n--Saves selections\r\nfunction buttonClick_submit()\r\n    fresh = false\r\n    if next(moveList) ~= nil then\r\n        for guid in pairs(moveList) do\r\n            moveGuid = guid\r\n        end\r\n        if memoryListBackup[moveGuid] == nil then\r\n            broadcastToAll(\"Item selected for moving is not already in memory\", {1, 0.25, 0.25})\r\n        else\r\n            broadcastToAll(\"Moving all items in memory relative to new objects position!\", {0.75, 0.75, 1})\r\n            self.clearButtons()\r\n            createMemoryActionButtons()\r\n            local count = 0\r\n            for guid in pairs(moveList) do\r\n                moveGuid = guid\r\n                count = count + 1\r\n                local obj = getObjectFromGUID(guid)\r\n                if obj ~= nil then obj.highlightOff() end\r\n            end\r\n            updateMemoryWithMoves()\r\n            updateSave()\r\n            buttonClick_place()\r\n        end\r\n    elseif next(memoryList) == nil and moveGuid == nil then\r\n      memoryList = memoryListBackup\r\n      broadcastToAll(\"No selections made.\", {0.75, 0.25, 0.25})\r\n    end\r\n    combineMemoryFromBagsWithin()\r\n    self.clearButtons()\r\n    createMemoryActionButtons()\r\n    local count = 0\r\n    for guid in pairs(memoryList) do\r\n        count = count + 1\r\n        local obj = getObjectFromGUID(guid)\r\n        if obj ~= nil then obj.highlightOff() end\r\n    end\r\n    broadcastToAll(count..\" Objects Saved\", {1,1,1})\r\n    updateSave()\r\n    moveGuid = nil\r\nend\r\n\r\nfunction combineTables(first_table, second_table)\r\n  for k,v in pairs(second_table) do first_table[k] = v end\r\nend\r\n\r\nfunction buttonClick_add()\r\n    fresh = false\r\n    combineTables(memoryList, memoryListBackup)\r\n    broadcastToAll(\"Adding internal bags and selections to existing memory\", {0.25, 0.75, 0.25})\r\n    combineMemoryFromBagsWithin()\r\n    self.clearButtons()\r\n    createMemoryActionButtons()\r\n    local count = 0\r\n    for guid in pairs(memoryList) do\r\n        count = count + 1\r\n        local obj = getObjectFromGUID(guid)\r\n        if obj ~= nil then obj.highlightOff() end\r\n    end\r\n    broadcastToAll(count..\" Objects Saved\", {1,1,1})\r\n    updateSave()\r\nend\r\n\r\nfunction buttonClick_remove()\r\n        broadcastToAll(\"Removing Selected Entries From Memory\", {1.0, 0.25, 0.25})\r\n        self.clearButtons()\r\n        createMemoryActionButtons()\r\n        local count = 0\r\n        for guid in pairs(memoryList) do\r\n            count = count + 1\r\n            memoryListBackup[guid] = nil\r\n            local obj = getObjectFromGUID(guid)\r\n            if obj ~= nil then obj.highlightOff() end\r\n        end\r\n        broadcastToAll(count..\" Objects Removed\", {1,1,1})\r\n        memoryList = memoryListBackup\r\n        updateSave()\r\nend\r\n\r\nfunction buttonClick_setNew()\r\n    broadcastToAll(\"Setting new position relative to items in memory\", {0.75, 0.75, 1})\r\n    self.clearButtons()\r\n    createMemoryActionButtons()\r\n    local count = 0\r\n    for _, obj in ipairs(getAllObjects()) do\r\n        guid = obj.guid\r\n        if memoryListBackup[guid] ~= nil then\r\n            count = count + 1\r\n            memoryListBackup[guid].pos = obj.getPosition()\r\n            memoryListBackup[guid].rot = obj.getRotation()\r\n            memoryListBackup[guid].lock = obj.getLock()\r\n        end\r\n    end\r\n    broadcastToAll(count..\" Objects Saved\", {1,1,1})\r\n    memoryList = memoryListBackup\r\n    updateSave()\r\nend\r\n\r\n--Resets bag to starting status\r\nfunction buttonClick_reset()\r\n    fresh = true\r\n    memoryList = {}\r\n    self.clearButtons()\r\n    createSetupButton()\r\n    removeAllHighlights()\r\n    broadcastToAll(\"Tool Reset\", {1,1,1})\r\n    updateSave()\r\nend\r\n\r\n\r\n--After Setup\r\n\r\n\r\n--Creates recall and place buttons\r\nfunction createMemoryActionButtons()\r\n    self.createButton({\r\n        label=\"Place\", click_function=\"buttonClick_place\", function_owner=self,\r\n        position={0.6,0.1,2.1}, rotation={0,0,0}, height=220, width=500,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\n    self.createButton({\r\n        label=\"Recall\", click_function=\"buttonClick_recall\", function_owner=self,\r\n        position={-0.6,0.1,2.1}, rotation={0,0,0}, height=220, width=500,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\n    self.createButton({\r\n        label=\"Setup\", click_function=\"buttonClick_setup\", function_owner=self,\r\n        position={0,0.1,-2.1}, rotation={0,0,0}, height=220, width=500,\r\n        font_size=130, color={0,0,0}, font_color={1,1,1}\r\n    })\r\n---    self.createButton({\r\n---      label=\"Move\", click_function=\"buttonClick_transpose\", function_owner=self,\r\n---      position={-2.8,0.3,0}, rotation={0,0,0}, height=350, width=800,\r\n---      font_size=250, color={0,0,0}, font_color={0.75,0.75,1}\r\n---    })\r\nend\r\n\r\n--Sends objects from bag/table to their saved position/rotation\r\nfunction buttonClick_place()\r\n    local bagObjList = self.getObjects()\r\n    for guid, entry in pairs(memoryList) do\r\n        local obj = getObjectFromGUID(guid)\r\n        --If obj is out on the table, move it to the saved pos/rot\r\n        if obj ~= nil then\r\n            obj.setPositionSmooth(entry.pos)\r\n            obj.setRotationSmooth(entry.rot)\r\n            obj.setLock(entry.lock)\r\n        else\r\n            --If obj is inside of the bag\r\n            for _, bagObj in ipairs(bagObjList) do\r\n                if bagObj.guid == guid then\r\n                    local item = self.takeObject({\r\n                        guid=guid, position=entry.pos, rotation=entry.rot, smooth=false\r\n                    })\r\n                    item.setLock(entry.lock)\r\n                    break\r\n                end\r\n            end\r\n        end\r\n    end\r\n    broadcastToAll(\"Objects Placed\", {1,1,1})\r\nend\r\n\r\n--Recalls objects to bag from table\r\nfunction buttonClick_recall()\r\n    for guid, entry in pairs(memoryList) do\r\n        local obj = getObjectFromGUID(guid)\r\n        if obj ~= nil then self.putObject(obj) end\r\n    end\r\n    broadcastToAll(\"Objects Recalled\", {1,1,1})\r\nend\r\n\r\n\r\n--Utility functions\r\n\r\n\r\n--Find delta (difference) between 2 x/y/z coordinates\r\nfunction findOffsetDistance(p1, p2, obj)\r\n    local yOffset = 0\r\n    if obj ~= nil then\r\n        local bounds = obj.getBounds()\r\n        yOffset = (bounds.size.y - bounds.offset.y)\r\n    end\r\n    local deltaPos = {}\r\n    deltaPos.x = (p2.x-p1.x)\r\n    deltaPos.y = (p2.y-p1.y) + yOffset\r\n    deltaPos.z = (p2.z-p1.z)\r\n    return deltaPos\r\nend\r\n\r\n--Used to rotate a set of coordinates by an angle\r\nfunction rotateLocalCoordinates(desiredPos, obj)\r\n\tlocal objPos, objRot = obj.getPosition(), obj.getRotation()\r\n    local angle = math.rad(objRot.y)\r\n\tlocal x = desiredPos.x * math.cos(angle) - desiredPos.z * math.sin(angle)\r\n\tlocal z = desiredPos.x * math.sin(angle) + desiredPos.z * math.cos(angle)\r\n\t--return {x=objPos.x+x, y=objPos.y+desiredPos.y, z=objPos.z+z}\r\n    return {x=x, y=desiredPos.y, z=z}\r\nend\r\n\r\nfunction rotateMyCoordinates(desiredPos, obj)\r\n\tlocal angle = math.rad(obj.getRotation().y)\r\n  local x = desiredPos.x * math.sin(angle)\r\n\tlocal z = desiredPos.z * math.cos(angle)\r\n    return {x=x, y=desiredPos.y, z=z}\r\nend\r\n\r\n--Coroutine delay, in seconds\r\nfunction wait(time)\r\n    local start = os.time()\r\n    repeat coroutine.yield(0) until os.time() > start + time\r\nend\r\n\r\n--Duplicates a table (needed to prevent it making reference to the same objects)\r\nfunction duplicateTable(oldTable)\r\n    local newTable = {}\r\n    for k, v in pairs(oldTable) do\r\n        newTable[k] = v\r\n    end\r\n    return newTable\r\nend\r\n\r\n--Moves scripted highlight from all objects\r\nfunction removeAllHighlights()\r\n    for _, obj in ipairs(getAllObjects()) do\r\n        obj.highlightOff()\r\n    end\r\nend\r\n\r\n--Round number (num) to the Nth decimal (dec)\r\nfunction round(num, dec)\r\n  local mult = 10^(dec or 0)\r\n  return math.floor(num * mult + 0.5) / mult\r\nend\r\n",
+  "Description": "Challenge Scenario",
+  "GMNotes": "",
+  "Grid": true,
+  "Autoraise": true,
+  "HideWhenFaceDown": false,
+  "Snap": true,
+  "MeshIndex": -1,
+  "Name": "Custom_Model_Bag",
+  "LuaScriptState": "{\"ml\":{\"0998ec\":{\"lock\":false,\"pos\":{\"x\":1.7110515832901,\"y\":1.55828714370728,\"z\":14.2457151412964},\"rot\":{\"x\":359.95556640625,\"y\":224.631256103516,\"z\":0.0689570754766464}},\"0f3a96\":{\"lock\":false,\"pos\":{\"x\":-34.2316017150879,\"y\":1.63262534141541,\"z\":11.6933059692383},\"rot\":{\"x\":359.955413818359,\"y\":224.999755859375,\"z\":0.0683816745877266}},\"1a4948\":{\"lock\":false,\"pos\":{\"x\":-3.47136402130127,\"y\":1.58184540271759,\"z\":-15.2412881851196},\"rot\":{\"x\":359.919738769531,\"y\":269.996856689453,\"z\":0.0168427713215351}},\"2c6d3b\":{\"lock\":false,\"pos\":{\"x\":-30.2241992950439,\"y\":1.64166986942291,\"z\":15.189998626709},\"rot\":{\"x\":359.920104980469,\"y\":269.999786376953,\"z\":0.0168399903923273}},\"3359db\":{\"lock\":false,\"pos\":{\"x\":-32.8963012695313,\"y\":1.62404108047485,\"z\":-11.1805047988892},\"rot\":{\"x\":359.931579589844,\"y\":314.999969482422,\"z\":359.955413818359}},\"392d3e\":{\"lock\":false,\"pos\":{\"x\":-36.7731018066406,\"y\":1.64856243133545,\"z\":7.56999778747559},\"rot\":{\"x\":359.920104980469,\"y\":269.997711181641,\"z\":0.0168428309261799}},\"3a4050\":{\"lock\":false,\"pos\":{\"x\":-27.228099822998,\"y\":1.62276840209961,\"z\":11.3825025558472},\"rot\":{\"x\":359.931579589844,\"y\":315.000061035156,\"z\":359.955413818359}},\"3b60c1\":{\"lock\":false,\"pos\":{\"x\":-30.2243003845215,\"y\":1.62582564353943,\"z\":7.56999969482422},\"rot\":{\"x\":359.920104980469,\"y\":270.009124755859,\"z\":0.0168570745736361}},\"3c63bd\":{\"lock\":false,\"pos\":{\"x\":-23.6765308380127,\"y\":1.6280665397644,\"z\":-0.0300527438521385},\"rot\":{\"x\":359.920104980469,\"y\":269.999938964844,\"z\":0.0168395601212978}},\"4f701e\":{\"lock\":false,\"pos\":{\"x\":-2.72473120689392,\"y\":1.61594641208649,\"z\":0.373453915119171},\"rot\":{\"x\":0.0168310105800629,\"y\":180.003479003906,\"z\":0.0802565813064575}},\"62791a\":{\"lock\":false,\"pos\":{\"x\":-27.0009994506836,\"y\":1.62018239498138,\"z\":3.66190314292908},\"rot\":{\"x\":359.955413818359,\"y\":224.999969482422,\"z\":0.0683810040354729}},\"7234af\":{\"lock\":false,\"pos\":{\"x\":-33.4277000427246,\"y\":1.62693536281586,\"z\":-3.85319900512695},\"rot\":{\"x\":359.955413818359,\"y\":224.996597290039,\"z\":0.0683831349015236}},\"7563ec\":{\"lock\":false,\"pos\":{\"x\":-3.92773413658142,\"y\":1.72993648052216,\"z\":5.75715303421021},\"rot\":{\"x\":359.919738769531,\"y\":269.999969482422,\"z\":180.016815185547}},\"7f7fb0\":{\"lock\":false,\"pos\":{\"x\":-1.46553933620453,\"y\":1.47562253475189,\"z\":-26.9304065704346},\"rot\":{\"x\":359.920135498047,\"y\":269.996429443359,\"z\":0.0168771725147963}},\"8984ad\":{\"lock\":false,\"pos\":{\"x\":-23.6767978668213,\"y\":1.62581276893616,\"z\":-7.70000123977661},\"rot\":{\"x\":359.920104980469,\"y\":270.019287109375,\"z\":0.0168126747012138}},\"917f3e\":{\"lock\":false,\"pos\":{\"x\":-12.0630035400391,\"y\":1.63608145713806,\"z\":8.27679634094238},\"rot\":{\"x\":359.920104980469,\"y\":269.999969482422,\"z\":180.016830444336}},\"91be46\":{\"lock\":false,\"pos\":{\"x\":-2.68855762481689,\"y\":1.59734880924225,\"z\":-5.04852485656738},\"rot\":{\"x\":0.0168315768241882,\"y\":180.002990722656,\"z\":0.080256387591362}},\"9c140b\":{\"lock\":false,\"pos\":{\"x\":-26.767599105835,\"y\":1.61765778064728,\"z\":-3.82140111923218},\"rot\":{\"x\":359.931579589844,\"y\":314.977905273438,\"z\":359.955444335938}},\"9c6651\":{\"lock\":false,\"pos\":{\"x\":-30.2234745025635,\"y\":1.62133610248566,\"z\":-7.70403909683228},\"rot\":{\"x\":359.920196533203,\"y\":270.015045166016,\"z\":0.0165500622242689}},\"b6b9b7\":{\"lock\":false,\"pos\":{\"x\":-36.7732009887695,\"y\":1.6440749168396,\"z\":-7.70000505447388},\"rot\":{\"x\":359.920104980469,\"y\":269.999816894531,\"z\":0.0168398879468441}},\"c150be\":{\"lock\":false,\"pos\":{\"x\":-23.6764984130859,\"y\":1.63030004501343,\"z\":7.56999683380127},\"rot\":{\"x\":359.920104980469,\"y\":269.999725341797,\"z\":0.0168400201946497}},\"cf00ee\":{\"lock\":false,\"pos\":{\"x\":-12.0105895996094,\"y\":1.68052327632904,\"z\":12.3205461502075},\"rot\":{\"x\":359.920104980469,\"y\":270.000061035156,\"z\":180.016830444336}},\"d28cd1\":{\"lock\":false,\"pos\":{\"x\":-30.2241992950439,\"y\":1.63719689846039,\"z\":-0.030001213774085},\"rot\":{\"x\":359.920104980469,\"y\":269.999755859375,\"z\":0.0168399550020695}},\"d5f792\":{\"lock\":false,\"pos\":{\"x\":-33.2551002502441,\"y\":1.62890470027924,\"z\":3.66560173034668},\"rot\":{\"x\":359.931579589844,\"y\":315.000091552734,\"z\":359.955413818359}},\"d9882d\":{\"lock\":false,\"pos\":{\"x\":-27.0109996795654,\"y\":1.61566078662872,\"z\":-11.7710037231445},\"rot\":{\"x\":359.955413818359,\"y\":225,\"z\":0.0683765634894371}},\"e86553\":{\"lock\":false,\"pos\":{\"x\":-3.955979347229,\"y\":1.59753942489624,\"z\":-10.4411535263062},\"rot\":{\"x\":359.919738769531,\"y\":269.993225097656,\"z\":0.0168475080281496}},\"e8fcf0\":{\"lock\":false,\"pos\":{\"x\":-30.2243003845215,\"y\":1.63271510601044,\"z\":-15.2799997329712},\"rot\":{\"x\":359.920104980469,\"y\":269.999908447266,\"z\":0.0168397407978773}}}}",
+  "Locked": false,
+  "MeasureMovement": false,
+  "CustomMesh": {
+    "CustomShader": {
+      "FresnelStrength": 0.0,
+      "SpecularColor": {
+        "r": 1.0,
+        "b": 1.0,
+        "g": 1.0
+      },
+      "SpecularSharpness": 2.0,
+      "SpecularIntensity": 0.0
+    },
+    "Convex": true,
+    "MaterialIndex": 3,
+    "NormalURL": "",
+    "TypeIndex": 6,
+    "MeshURL": "https://raw.githubusercontent.com/RobMayer/TTSLibrary/master/advboxes/tuckbox_h_MSH.obj",
+    "DiffuseURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610824071/BD70BFDA6DED25221D6DC1BE60C8CE11B165F848/",
+    "ColliderURL": "",
+    "CastShadows": true
+  },
+  "AttachedDecals": [
+    {
+      "Transform": {
+        "posX": -0.0021877822,
+        "scaleX": 2.00000215,
+        "posY": -0.08963572,
+        "scaleY": 2.00000238,
+        "posZ": -0.00288731651,
+        "rotX": 270.0,
+        "rotZ": 0.0,
+        "rotY": 359.869568,
+        "scaleZ": 2.00000262
+      },
+      "CustomDecal": {
+        "Size": 7.4,
+        "ImageURL": "http://cloud-3.steamusercontent.com/ugc/959719855119695911/931B9829687A20F4DEADB36DA57B7E6D76792231/",
+        "Name": "dunwich_back"
+      }
+    }
+  ],
+  "Nickname": "Red Tide Rising",
+  "GridProjection": false,
+  "Hands": false,
+  "MaterialIndex": -1,
+  "LayoutGroupSortIndex": 0,
+  "Tooltip": true,
+  "GUID": "5302f2",
+  "ColorDiffuse": {
+    "r": 1.0,
+    "b": 1.0,
+    "g": 1.0
+  },
+  "Bag": {
+    "Order": 0
+  },
+  "ContainedObjects": [
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "MeshIndex": -1,
+      "Name": "Custom_Model_Bag",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomMesh": {
+        "Convex": true,
+        "MaterialIndex": 1,
+        "NormalURL": "http://cloud-3.steamusercontent.com/ugc/764975951334960069/E70E4A58A1B7827F1E5E2AF9FF44DF0BD5DA33F7/",
+        "TypeIndex": 6,
+        "MeshURL": "http://cloud-3.steamusercontent.com/ugc/764975951334964971/3078F312706FC974833ECD2A359B87FD4F283509/",
+        "DiffuseURL": "http://cloud-3.steamusercontent.com/ugc/764975951334960553/C518D80E31E27DB23EEAC8CF9253E59798865790/",
+        "ColliderURL": "",
+        "CastShadows": true
+      },
+      "Nickname": "Set-aside",
+      "GridProjection": false,
+      "Hands": false,
+      "MaterialIndex": -1,
+      "LayoutGroupSortIndex": 0,
+      "Tooltip": true,
+      "GUID": "0998ec",
+      "ColorDiffuse": {
+        "r": 0.02148666,
+        "b": 0.02148666,
+        "g": 0.00100758043
+      },
+      "PhysicsMaterial": {
+        "StaticFriction": 0.6,
+        "DynamicFriction": 0.6,
+        "Bounciness": 0.0,
+        "BounceCombine": 0,
+        "FrictionCombine": 0
+      },
+      "Rigidbody": {
+        "Mass": 1.375,
+        "Drag": 5.0,
+        "AngularDrag": 5.0,
+        "UseGravity": true
+      },
+      "Bag": {
+        "Order": 0
+      },
+      "ContainedObjects": [
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Elite.",
+          "GMNotes": "{\n  \"id\": \"07062\",\n  \"type\": \"Enemy\",\n  \"class\": \"Neutral\",\n  \"cost\": 4,\n  \"traits\": \"Humanoid. Elite.\",\n  \"willpowerIcons\": 1,\n  \"combatIcons\": 1,\n  \"wildIcons\": 1,\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": false,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3699": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": true,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+              "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Angry Mob",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "785a9e",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369918,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 5.089534,
+            "scaleX": 1.0,
+            "posY": 3.38468456,
+            "scaleY": 1.0,
+            "posZ": -14.3808765,
+            "rotX": 359.9216,
+            "rotZ": 180.016953,
+            "rotY": 270.0008,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        }
+      ],
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": 1.71105254,
+        "scaleX": 2.0,
+        "posY": 1.55828691,
+        "scaleY": 2.0,
+        "posZ": 14.245717,
+        "rotX": 359.955566,
+        "rotZ": 0.06895777,
+        "rotY": 224.631256,
+        "scaleZ": 2.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "name = 'Red Tide'\r\n\r\nfunction onLoad()\r\n    Global.call('createSetupButtons', {object=self, key=name})\r\nend\r\n\r\nfunction easyClick()\r\n    Global.call('fillContainer', {object=self, key=name, mode='easy'})\r\nend\r\n\r\nfunction normalClick()\r\n    Global.call('fillContainer', {object=self, key=name, mode='normal'})\r\nend\r\n\r\nfunction hardClick()\r\n    Global.call('fillContainer', {object=self, key=name, mode='hard'})\r\nend\r\n\r\nfunction expertClick()\r\n    Global.call('fillContainer', {object=self, key=name, mode='expert'})\r\nend\r\n\r\nfunction standaloneClick()\r\n    Global.call('fillContainer', {object=self, key=name, mode='standalone'})\r\nend",
+      "Description": "click to set chaos token difficulty",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Custom_Tile",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "Nickname": "Red Tide Rising",
+      "GridProjection": false,
+      "Hands": false,
+      "LayoutGroupSortIndex": 0,
+      "Tooltip": true,
+      "GUID": "1a4948",
+      "ColorDiffuse": {
+        "r": 1.0,
+        "b": 1.0,
+        "g": 1.0
+      },
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "CustomImage": {
+        "WidthScale": 0.0,
+        "CustomTile": {
+          "Thickness": 0.1,
+          "Type": 3,
+          "Stackable": false,
+          "Stretch": true
+        },
+        "ImageURL": "http://cloud-3.steamusercontent.com/ugc/965354846165100486/3DC8FCEF364B30758B09EF96AF9458F2B8E64D56/",
+        "ImageScalar": 1.0,
+        "ImageSecondaryURL": "https://i.imgur.com/EcbhVuh.jpg/"
+      },
+      "Value": 0,
+      "Transform": {
+        "posX": -3.47136378,
+        "scaleX": 2.2,
+        "posY": 1.5818454,
+        "scaleY": 1.0,
+        "posZ": -15.241291,
+        "rotX": 359.919739,
+        "rotZ": 0.0168422218,
+        "rotY": 269.996857,
+        "scaleZ": 2.2
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07069\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Apostrophe\",\n    \"connections\": \"Diamond|Star|Tilde|Plus\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Apostrophe\",\n    \"connections\": \"Diamond|Star|Tilde|Plus\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 2,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "The Little Bookshop",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "2c6d3b",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369925,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -30.2242,
+        "scaleX": 1.0,
+        "posY": 1.64166987,
+        "scaleY": 1.0,
+        "posZ": 15.1899986,
+        "rotX": 359.9201,
+        "rotZ": 0.0168400537,
+        "rotY": 269.999756,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07064\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Diamond\",\n    \"connections\": \"Triangle|Crescent|Star|Tilde|Tee\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Diamond\",\n    \"connections\": \"Triangle|Crescent|Star|Tilde|Tee\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "Gilman House",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "392d3e",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369920,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -36.7731,
+        "scaleX": 1.0,
+        "posY": 1.64856243,
+        "scaleY": 1.0,
+        "posZ": 7.56999731,
+        "rotX": 359.9201,
+        "rotZ": 0.0168428756,
+        "rotY": 269.997681,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "All I Have Left of Him",
+      "GMNotes": "{\n  \"id\": \"90045a\",\n  \"type\": \"Asset\",\n  \"class\": \"Neutral\",\n  \"traits\": \"Item.\",\n  \"cycle\": \"Standalone\"\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "5359": {
+          "NumWidth": 3,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 3,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+        }
+      },
+      "Tags": [
+        "Asset",
+        "PlayerCard"
+      ],
+      "Nickname": "Mysterious Photo",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "3c63bd",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 535907,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -23.67653,
+        "scaleX": 1.1,
+        "posY": 1.62806654,
+        "scaleY": 1.0,
+        "posZ": -0.0300531164,
+        "rotX": 359.9201,
+        "rotZ": 0.0168395434,
+        "rotY": 269.999939,
+        "scaleZ": 1.1
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": true,
+      "Snap": true,
+      "Name": "Deck",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "5358": {
+          "NumWidth": 3,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 3,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+        }
+      },
+      "Nickname": "Agenda Deck",
+      "GridProjection": false,
+      "Hands": false,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": true,
+      "Tooltip": true,
+      "GUID": "4f701e",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "DeckIDs": [
+        535805,
+        535804
+      ],
+      "ContainedObjects": [
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Agenda 2",
+          "GMNotes": "{\n  \"id\": \"90043\",\n  \"type\": \"Agenda\",\n  \"class\": \"Mythos\",\n  \"doomThreshold\": 9,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "5358": {
+              "NumWidth": 3,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": true,
+              "NumHeight": 3,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+              "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Trail Goes Cold",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": true,
+          "Tooltip": true,
+          "GUID": "5c04c8",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 535805,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 4.14589,
+            "scaleX": 1.1,
+            "posY": 1.28256786,
+            "scaleY": 1.0,
+            "posZ": 76.7410049,
+            "rotX": 0.01698549,
+            "rotZ": 359.9778,
+            "rotY": 180.002975,
+            "scaleZ": 1.1
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Agenda 1",
+          "GMNotes": "{\n  \"id\": \"90042\",\n  \"type\": \"Agenda\",\n  \"class\": \"Mythos\",\n  \"doomThreshold\": 3,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "5358": {
+              "NumWidth": 3,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": true,
+              "NumHeight": 3,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+              "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "The New Girl",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": true,
+          "Tooltip": true,
+          "GUID": "5077d4",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 535804,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 4.076534,
+            "scaleX": 1.1,
+            "posY": 1.32421017,
+            "scaleY": 1.0,
+            "posZ": 76.26786,
+            "rotX": 0.0156913977,
+            "rotZ": 359.977,
+            "rotY": 180.002945,
+            "scaleZ": 1.1
+          },
+          "Sticky": true
+        }
+      ],
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -2.724758,
+        "scaleX": 1.1,
+        "posY": 1.61594653,
+        "scaleY": 1.0,
+        "posZ": 0.3734602,
+        "rotX": 0.0168309528,
+        "rotZ": 0.0802565962,
+        "rotY": 180.003479,
+        "scaleZ": 1.1
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": true,
+      "Snap": true,
+      "Name": "Deck",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "2317": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": false,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+          "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+        },
+        "3695": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": false,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+          "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+        }
+      },
+      "Nickname": "Encounter Deck",
+      "GridProjection": false,
+      "Hands": false,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "7563ec",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "DeckIDs": [
+        231721,
+        231721,
+        231720,
+        231720,
+        369537,
+        369537,
+        369536,
+        369536,
+        369535,
+        369535,
+        369518,
+        369518,
+        369518,
+        369517,
+        231704,
+        231704,
+        231703,
+        231703,
+        231703,
+        369528,
+        369528,
+        231726,
+        231726,
+        231727,
+        231727
+      ],
+      "ContainedObjects": [
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"01168\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Obscuring Fog",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "50e716",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231721,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -13.8034887,
+            "scaleX": 1.0,
+            "posY": 1.57302034,
+            "scaleY": 1.0,
+            "posZ": 1.99893022,
+            "rotX": 359.920471,
+            "rotZ": 0.0145632224,
+            "rotY": 270.000641,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"01168\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Obscuring Fog",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "c4ce76",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231721,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -13.9735909,
+            "scaleX": 1.0,
+            "posY": 1.73492968,
+            "scaleY": 1.0,
+            "posZ": 1.969332,
+            "rotX": 359.9267,
+            "rotZ": 0.0145301558,
+            "rotY": 270.0006,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"01167\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Crypt Chill",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ab3719",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231720,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -14.5550861,
+            "scaleX": 1.0,
+            "posY": 1.57516873,
+            "scaleY": 1.0,
+            "posZ": 5.69822454,
+            "rotX": 359.92038,
+            "rotZ": 0.0152713312,
+            "rotY": 270.002563,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"01167\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Crypt Chill",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "16d6d6",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231720,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -14.5491152,
+            "scaleX": 1.0,
+            "posY": 1.73727059,
+            "scaleY": 1.0,
+            "posZ": 5.64764357,
+            "rotX": 359.924774,
+            "rotZ": 0.0113747623,
+            "rotY": 270.002625,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Terror.",
+          "GMNotes": "{\n  \"id\": \"07107\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Terror.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Furtive Locals",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "bff645",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369537,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 14.9167461,
+            "scaleX": 1.0,
+            "posY": 1.29322946,
+            "scaleY": 1.0,
+            "posZ": 88.67889,
+            "rotX": 0.0208082665,
+            "rotZ": 0.0167705175,
+            "rotY": 270.0,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Terror.",
+          "GMNotes": "{\n  \"id\": \"07107\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Terror.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Furtive Locals",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "361ef8",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369537,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 14.9876537,
+            "scaleX": 1.0,
+            "posY": 1.34558451,
+            "scaleY": 1.0,
+            "posZ": 88.90277,
+            "rotX": 0.0208082441,
+            "rotZ": 0.0167707019,
+            "rotY": 270.0,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Curse. Terror.",
+          "GMNotes": "{\n  \"id\": \"07106\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Curse. Terror.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Innsmouth Look",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "0db0c4",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369536,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.9170408,
+            "scaleX": 1.0,
+            "posY": 1.28977,
+            "scaleY": 1.0,
+            "posZ": 86.7585144,
+            "rotX": 0.0865196139,
+            "rotZ": 0.0168519132,
+            "rotY": 269.9999,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Curse. Terror.",
+          "GMNotes": "{\n  \"id\": \"07106\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Curse. Terror.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Innsmouth Look",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "7a223a",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369536,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.8974714,
+            "scaleX": 1.0,
+            "posY": 1.34094608,
+            "scaleY": 1.0,
+            "posZ": 86.71393,
+            "rotX": 0.08651943,
+            "rotZ": 0.0168519579,
+            "rotY": 269.999939,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Hybrid. Criminal.",
+          "GMNotes": "{\n  \"id\": \"07105\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Hybrid. Criminal.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Innsmouth Troublemaker",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "e0b755",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369535,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 11.0240679,
+            "scaleX": 1.0,
+            "posY": 1.28977513,
+            "scaleY": 1.0,
+            "posZ": 86.44582,
+            "rotX": 0.0900193,
+            "rotZ": 0.01656051,
+            "rotY": 269.999329,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Hybrid. Criminal.",
+          "GMNotes": "{\n  \"id\": \"07105\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Hybrid. Criminal.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Innsmouth Troublemaker",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "26dd1a",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369535,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 11.0463581,
+            "scaleX": 1.0,
+            "posY": 1.33260107,
+            "scaleY": 1.0,
+            "posZ": 86.84277,
+            "rotX": 0.090017505,
+            "rotZ": 0.0165598355,
+            "rotY": 269.9995,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Hybrid. Cultist.",
+          "GMNotes": "{\n  \"id\": \"07085\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Hybrid. Cultist.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Initiate of Dagon",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "f3e298",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369518,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 16.7162762,
+            "scaleX": 1.0,
+            "posY": 1.29209316,
+            "scaleY": 1.0,
+            "posZ": 82.56404,
+            "rotX": 0.020808341,
+            "rotZ": 0.0167706888,
+            "rotY": 269.999939,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Hybrid. Cultist.",
+          "GMNotes": "{\n  \"id\": \"07085\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Hybrid. Cultist.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Initiate of Dagon",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "cedd09",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369518,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 16.9021435,
+            "scaleX": 1.0,
+            "posY": 1.34428608,
+            "scaleY": 1.0,
+            "posZ": 82.8680038,
+            "rotX": 0.02080834,
+            "rotZ": 0.01677102,
+            "rotY": 269.999939,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Hybrid. Cultist.",
+          "GMNotes": "{\n  \"id\": \"07085\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Hybrid. Cultist.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Initiate of Dagon",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "fdd1db",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369518,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 16.902132,
+            "scaleX": 1.0,
+            "posY": 1.371386,
+            "scaleY": 1.0,
+            "posZ": 82.86799,
+            "rotX": 0.0213474762,
+            "rotZ": 0.0158365034,
+            "rotY": 269.999939,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Humanoid. Cultist.",
+          "GMNotes": "{\n  \"id\": \"07084\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Cultist.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Priest of Dagon",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "4eaf3e",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369517,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 16.8866539,
+            "scaleX": 1.0,
+            "posY": 1.367101,
+            "scaleY": 1.0,
+            "posZ": 82.2407455,
+            "rotX": 0.02080632,
+            "rotZ": 0.016776612,
+            "rotY": 269.999939,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "",
+          "GMNotes": "{\n  \"id\": \"01136\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "False Lead",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "057d5f",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231704,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 24.0263729,
+            "scaleX": 1.0,
+            "posY": 1.28674042,
+            "scaleY": 1.0,
+            "posZ": 55.30762,
+            "rotX": 0.0209410526,
+            "rotZ": 0.0141459936,
+            "rotY": 270.016479,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "",
+          "GMNotes": "{\n  \"id\": \"01136\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "False Lead",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "2ceae2",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231704,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 24.1512775,
+            "scaleX": 1.0,
+            "posY": 1.32045674,
+            "scaleY": 1.0,
+            "posZ": 55.1448746,
+            "rotX": 0.0271461736,
+            "rotZ": 359.922424,
+            "rotY": 270.012024,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Curse.",
+          "GMNotes": "{\n  \"id\": \"01135\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Curse.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Hunting Shadow",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ab3719",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231703,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 24.0681438,
+            "scaleX": 1.0,
+            "posY": 1.353897,
+            "scaleY": 1.0,
+            "posZ": 54.8185272,
+            "rotX": 0.006743878,
+            "rotZ": 0.0777995959,
+            "rotY": 269.983856,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Curse.",
+          "GMNotes": "{\n  \"id\": \"01135\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Curse.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Hunting Shadow",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ea8fcf",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231703,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 24.2313652,
+            "scaleX": 1.0,
+            "posY": 1.99082291,
+            "scaleY": 1.0,
+            "posZ": 55.54476,
+            "rotX": 0.01695253,
+            "rotZ": 34.2776833,
+            "rotY": 269.9969,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Curse.",
+          "GMNotes": "{\n  \"id\": \"01135\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Curse.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Hunting Shadow",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "14bfaf",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231703,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 23.9109631,
+            "scaleX": 1.0,
+            "posY": 1.579709,
+            "scaleY": 1.0,
+            "posZ": 55.1731148,
+            "rotX": 0.0218963064,
+            "rotZ": 11.9523859,
+            "rotY": 270.002319,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"07095\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Fog over Innsmouth",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "7ddc8f",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369528,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.4291449,
+            "scaleX": 1.0,
+            "posY": 1.287992,
+            "scaleY": 1.0,
+            "posZ": 87.3974457,
+            "rotX": 0.0208086781,
+            "rotZ": 0.016770998,
+            "rotY": 270.0,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Hazard.",
+          "GMNotes": "{\n  \"id\": \"07095\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Hazard.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Fog over Innsmouth",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "e26478",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369528,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.6816444,
+            "scaleX": 1.0,
+            "posY": 1.32926881,
+            "scaleY": 1.0,
+            "posZ": 87.5190353,
+            "rotX": 0.0208086055,
+            "rotZ": 0.0167709254,
+            "rotY": 269.999969,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "",
+          "GMNotes": "{\n  \"id\": \"01173\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "On Wings of Darkness",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "1e04da",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231726,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -13.4282417,
+            "scaleX": 1.0,
+            "posY": 1.70155811,
+            "scaleY": 1.0,
+            "posZ": 13.7778349,
+            "rotX": 359.535278,
+            "rotZ": 181.449341,
+            "rotY": 269.9516,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "",
+          "GMNotes": "{\n  \"id\": \"01173\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "On Wings of Darkness",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "1d0c1c",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231726,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -15.7923059,
+            "scaleX": 1.0,
+            "posY": 1.73901558,
+            "scaleY": 1.0,
+            "posZ": 4.52112341,
+            "rotX": 359.919861,
+            "rotZ": 0.0123590212,
+            "rotY": 269.999969,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Obstacle.",
+          "GMNotes": "{\n  \"id\": \"01174\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Obstacle.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Locked Door",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ab3719",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231727,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -17.60739,
+            "scaleX": 1.0,
+            "posY": 1.58022821,
+            "scaleY": 1.0,
+            "posZ": 8.422101,
+            "rotX": 359.920349,
+            "rotZ": 0.0154577158,
+            "rotY": 269.999756,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Obstacle.",
+          "GMNotes": "{\n  \"id\": \"01174\",\n  \"type\": \"Treachery\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Obstacle.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Locked Door",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "4904d0",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231727,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": -18.06458,
+            "scaleX": 1.0,
+            "posY": 1.74395728,
+            "scaleY": 1.0,
+            "posZ": 8.675678,
+            "rotX": 359.928467,
+            "rotZ": 0.006147271,
+            "rotY": 269.9997,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        }
+      ],
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -3.92776155,
+        "scaleX": 1.0,
+        "posY": 1.72993648,
+        "scaleY": 1.0,
+        "posZ": 5.75715971,
+        "rotX": 359.919739,
+        "rotZ": 180.016815,
+        "rotY": 269.999969,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Custom_PDF",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "Nickname": "Red Tide Rising Campaign Guide",
+      "GridProjection": false,
+      "Hands": false,
+      "CustomPDF": {
+        "PDFPageOffset": 0,
+        "PDFPassword": "",
+        "PDFPage": 0,
+        "PDFUrl": "http://cloud-3.steamusercontent.com/ugc/1849293764610894216/3926C0D4B598133D2FB6E692D8566C0919A2D87B/"
+      },
+      "LayoutGroupSortIndex": 0,
+      "Tooltip": true,
+      "GUID": "7f7fb0",
+      "ColorDiffuse": {
+        "r": 1.0,
+        "b": 1.0,
+        "g": 1.0
+      },
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -1.4655385,
+        "scaleX": 2.48152614,
+        "posY": 1.47562277,
+        "scaleY": 1.0,
+        "posZ": -26.93041,
+        "rotX": 359.920135,
+        "rotZ": 0.0168771055,
+        "rotY": 269.996429,
+        "scaleZ": 2.48152614
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07063\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Circle\",\n    \"connections\": \"Triangle|Hourglass|Crescent|Square|Heart\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Circle\",\n    \"connections\": \"Triangle|Hourglass|Crescent|Square|Heart\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "Marsh Refinery",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "8984ad",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369919,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -23.6767979,
+        "scaleX": 1.0,
+        "posY": 1.62581277,
+        "scaleY": 1.0,
+        "posZ": -7.70000172,
+        "rotX": 359.9201,
+        "rotZ": 0.0168127511,
+        "rotY": 270.0193,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": true,
+      "Snap": true,
+      "Name": "Deck",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "2317": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": false,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+          "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+        },
+        "3695": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": false,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+          "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+        }
+      },
+      "Nickname": "Monsters",
+      "GridProjection": false,
+      "Hands": false,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "917f3e",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "DeckIDs": [
+        231725,
+        231725,
+        369527
+      ],
+      "ContainedObjects": [
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Monster. Nightgaunt.",
+          "GMNotes": "{\n  \"id\": \"01172\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Monster. Nightgaunt.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Hunting Nightgaunt",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ab3719",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231725,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 2.87315774,
+            "scaleX": 1.0,
+            "posY": 1.316957,
+            "scaleY": 1.0,
+            "posZ": 53.3786926,
+            "rotX": 0.017015826,
+            "rotZ": 0.02018254,
+            "rotY": 270.000031,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Monster. Nightgaunt.",
+          "GMNotes": "{\n  \"id\": \"01172\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Monster. Nightgaunt.\",\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "2317": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/775106514377430057/E4E5A51434CEF23EF5D04A104F352520304AA550/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Hunting Nightgaunt",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "b75b70",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 231725,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 2.856161,
+            "scaleX": 1.0,
+            "posY": 1.27535045,
+            "scaleY": 1.0,
+            "posZ": 53.8111153,
+            "rotX": 0.0214114543,
+            "rotZ": 0.0127825448,
+            "rotY": 270.000061,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Creature. Monster.",
+          "GMNotes": "{\n  \"id\": \"07094\",\n  \"type\": \"Enemy\",\n  \"traits\": \"Creature. Monster.\",\n  \"victory\": 1,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Winged One",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "55601e",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369527,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 2.87519026,
+            "scaleX": 1.0,
+            "posY": 1.35105038,
+            "scaleY": 1.0,
+            "posZ": 53.24371,
+            "rotX": 0.0213116,
+            "rotZ": 0.0166656915,
+            "rotY": 270.0,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        }
+      ],
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -12.06303,
+        "scaleX": 1.0,
+        "posY": 1.63608158,
+        "scaleY": 1.0,
+        "posZ": 8.276802,
+        "rotX": 359.9201,
+        "rotZ": 180.01683,
+        "rotY": 269.999969,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Act 1",
+      "GMNotes": "{\n  \"id\": \"90044\",\n  \"type\": \"Act\",\n  \"class\": \"Mythos\",\n  \"cycle\": \"Standalone\"\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": true,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "5358": {
+          "NumWidth": 3,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 3,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+        }
+      },
+      "Tags": [
+        "ScenarioCard"
+      ],
+      "Nickname": "Searching for Dad",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": true,
+      "Tooltip": true,
+      "GUID": "91be46",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 535806,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -2.68855786,
+        "scaleX": 1.1,
+        "posY": 1.59734881,
+        "scaleY": 1.0,
+        "posZ": -5.048525,
+        "rotX": 0.0168318227,
+        "rotZ": 0.0802558139,
+        "rotY": 180.002991,
+        "scaleZ": 1.1
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07068\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Hourglass\",\n    \"connections\": \"Triangle|Circle|Crescent|SlantedEquals|Tee\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Hourglass\",\n    \"connections\": \"Triangle|Circle|Crescent|SlantedEquals|Tee\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "Fish Street Bridge",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "b6b9b7",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369924,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -36.7732,
+        "scaleX": 1.0,
+        "posY": 1.64407492,
+        "scaleY": 1.0,
+        "posZ": -7.70000648,
+        "rotX": 359.9201,
+        "rotZ": 0.0168398861,
+        "rotY": 269.999817,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07067\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Star\",\n    \"connections\": \"Triangle|Diamond|Apostrophe|Square|Plus\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Star\",\n    \"connections\": \"Triangle|Diamond|Apostrophe|Square|Plus\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "First National Grocery",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "c150be",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369923,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -23.6764984,
+        "scaleX": 1.0,
+        "posY": 1.6303,
+        "scaleY": 1.0,
+        "posZ": 7.569996,
+        "rotX": 359.9201,
+        "rotZ": 0.01684001,
+        "rotY": 269.9997,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "",
+      "GMNotes": "",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": true,
+      "Snap": true,
+      "Name": "Deck",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3695": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": false,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+          "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+        }
+      },
+      "Nickname": "Leads",
+      "GridProjection": false,
+      "Hands": false,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "cf00ee",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "DeckIDs": [
+        369509,
+        369503,
+        369505,
+        369510,
+        369507,
+        369511,
+        369504,
+        369513,
+        369514,
+        369508,
+        369506,
+        369512
+      ],
+      "ContainedObjects": [
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Disgruntled Dockworker",
+          "GMNotes": "{\n  \"id\": \"07076\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Robert Friendly",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "96af0c",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369509,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 9.710096,
+            "scaleX": 1.0,
+            "posY": 1.6056819,
+            "scaleY": 1.0,
+            "posZ": 9.222093,
+            "rotX": 359.920135,
+            "rotZ": 0.5751861,
+            "rotY": 270.007751,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07070\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"Plus\",\n    \"connections\": \"Apostrophe|Star\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "Esoteric Order of Dagon",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "28c301",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369503,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.0056915,
+            "scaleX": 1.0,
+            "posY": 1.4802171,
+            "scaleY": 1.0,
+            "posZ": 6.24949741,
+            "rotX": 359.920135,
+            "rotZ": 0.01687472,
+            "rotY": 269.999451,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07072\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"SlantedEquals\",\n    \"connections\": \"Hourglass|Crescent\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "Shoreward Slums",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "24e42d",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369505,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.3275185,
+            "scaleX": 1.0,
+            "posY": 1.60739374,
+            "scaleY": 1.0,
+            "posZ": 5.66956758,
+            "rotX": 359.920135,
+            "rotZ": 0.0168736223,
+            "rotY": 269.999329,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Drunk and Disorderly",
+          "GMNotes": "{\n  \"id\": \"07077\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Zadok Allen",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "348f7d",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369510,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.6768465,
+            "scaleX": 1.0,
+            "posY": 1.55609453,
+            "scaleY": 1.0,
+            "posZ": 8.935216,
+            "rotX": 0.07987808,
+            "rotZ": 359.4248,
+            "rotY": 269.997559,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07074\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"Tee\",\n    \"connections\": \"Diamond|Triangle|Hourglass\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "Innsmouth Jail",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "f63738",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369507,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.2499208,
+            "scaleX": 1.0,
+            "posY": 1.65023494,
+            "scaleY": 1.0,
+            "posZ": 3.98454642,
+            "rotX": 359.920532,
+            "rotZ": 3.2808857,
+            "rotY": 269.998962,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Wants Out",
+          "GMNotes": "{\n  \"id\": \"07078\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Brian Burnham",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "ad6f8c",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369511,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.7399845,
+            "scaleX": 1.0,
+            "posY": 1.5332582,
+            "scaleY": 1.0,
+            "posZ": 7.44676971,
+            "rotX": 0.07987619,
+            "rotZ": 359.983124,
+            "rotY": 269.999451,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07071\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"Tilde\",\n    \"connections\": \"Apostrophe|Diamond\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 2,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "Sawbone Alley",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "899c2c",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369504,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.7452335,
+            "scaleX": 1.0,
+            "posY": 1.5302093,
+            "scaleY": 1.0,
+            "posZ": 6.07885933,
+            "rotX": 359.920135,
+            "rotZ": 0.0168747175,
+            "rotY": 269.9994,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Bookshop Owner",
+          "GMNotes": "{\n  \"id\": \"07080\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Joyce Little",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "5b9c7a",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369513,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.0060644,
+            "scaleX": 1.0,
+            "posY": 1.483266,
+            "scaleY": 1.0,
+            "posZ": 7.13651037,
+            "rotX": 359.920135,
+            "rotZ": 0.0168732535,
+            "rotY": 270.0,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Proprietress of the Hotel",
+          "GMNotes": "{\n  \"id\": \"07081\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Othera Gilman",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "389fda",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369514,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 8.197248,
+            "scaleX": 1.0,
+            "posY": 1.48652267,
+            "scaleY": 1.0,
+            "posZ": 9.632337,
+            "rotX": 359.920135,
+            "rotZ": 0.0168756321,
+            "rotY": 269.9995,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07075\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"Square\",\n    \"connections\": \"Circle|Triangle|Star\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 2,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "New Church Green",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "d1ef9c",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369508,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.2500029,
+            "scaleX": 1.0,
+            "posY": 1.57991564,
+            "scaleY": 1.0,
+            "posZ": 3.988231,
+            "rotX": 359.9205,
+            "rotZ": 5.31646729,
+            "rotY": 270.004517,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "Innsmouth. Hideout.",
+          "GMNotes": "{\n  \"id\": \"07073\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Hideout.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"victory\": 1,\n    \"icons\": \"Heart\",\n    \"connections\": \"Circle|Crescent\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 2,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "Location",
+            "ScenarioCard"
+          ],
+          "Nickname": "The House on Water Street",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "e4f53a",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369506,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 12.2770824,
+            "scaleX": 1.0,
+            "posY": 1.58020127,
+            "scaleY": 1.0,
+            "posZ": 5.489721,
+            "rotX": 359.920135,
+            "rotZ": 0.016874725,
+            "rotY": 269.9994,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        },
+        {
+          "XmlUI": "",
+          "LuaScript": "",
+          "Description": "The Change Is upon Him",
+          "GMNotes": "{\n  \"id\": \"07079\",\n  \"type\": \"Enemy\",\n  \"class\": \"Mythos\",\n  \"traits\": \"Humanoid. Suspect. Elite.\",\n  \"victory\": 0,\n  \"cycle\": \"Standalone\"\n}",
+          "Grid": true,
+          "Autoraise": true,
+          "HideWhenFaceDown": true,
+          "Snap": true,
+          "Name": "Card",
+          "LuaScriptState": "",
+          "Locked": false,
+          "MeasureMovement": false,
+          "CustomDeck": {
+            "3695": {
+              "NumWidth": 10,
+              "BackIsHidden": true,
+              "Type": 0,
+              "UniqueBack": false,
+              "NumHeight": 7,
+              "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132663476/95B0BD966B579DEE644A25703730C8729B16AAF8/",
+              "BackURL": "https://i.imgur.com/sRsWiSG.jpg/"
+            }
+          },
+          "Tags": [
+            "ScenarioCard"
+          ],
+          "Nickname": "Barnabas Marsh",
+          "GridProjection": false,
+          "Hands": true,
+          "LayoutGroupSortIndex": 0,
+          "SidewaysCard": false,
+          "Tooltip": true,
+          "GUID": "87e88e",
+          "ColorDiffuse": {
+            "r": 0.713235259,
+            "b": 0.713235259,
+            "g": 0.713235259
+          },
+          "CardID": 369512,
+          "DragSelectable": true,
+          "IgnoreFoW": false,
+          "Value": 0,
+          "Transform": {
+            "posX": 10.8849287,
+            "scaleX": 1.0,
+            "posY": 1.49845958,
+            "scaleY": 1.0,
+            "posZ": 10.2256308,
+            "rotX": 359.340424,
+            "rotZ": 0.0171198025,
+            "rotY": 269.997742,
+            "scaleZ": 1.0
+          },
+          "Sticky": true
+        }
+      ],
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -12.0106144,
+        "scaleX": 1.0,
+        "posY": 1.68052328,
+        "scaleY": 1.0,
+        "posZ": 12.3205538,
+        "rotX": 359.9201,
+        "rotZ": 180.01683,
+        "rotY": 270.0001,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth. Central.",
+      "GMNotes": "{\n  \"id\": \"07065\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth. Central.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Triangle\",\n    \"connections\": \"Circle|Diamond|Star|Hourglass|Square|Tee\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Triangle\",\n    \"connections\": \"Circle|Diamond|Star|Hourglass|Square|Tee\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 1,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "Innsmouth Square",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "d28cd1",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369921,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -30.2242,
+        "scaleX": 1.0,
+        "posY": 1.6371969,
+        "scaleY": 1.0,
+        "posZ": -0.03000154,
+        "rotX": 359.9201,
+        "rotZ": 0.016839968,
+        "rotY": 269.999756,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Red Tide Rising",
+      "GMNotes": "null",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "5359": {
+          "NumWidth": 3,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 3,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610856838/D7BEC8CBBE4F692DC2033065B210E0C1B0869BB1/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1849293764610857202/7BDF70F6A11E1F9779ED6AB2BBD6C8C33A930CDE/"
+        }
+      },
+      "Nickname": "Scenario",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "e86553",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 535903,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -3.95597982,
+        "scaleX": 1.1,
+        "posY": 1.59753942,
+        "scaleY": 1.0,
+        "posZ": -10.4411554,
+        "rotX": 359.919739,
+        "rotZ": 0.0168465469,
+        "rotY": 269.9932,
+        "scaleZ": 1.1
+      },
+      "Sticky": true
+    },
+    {
+      "XmlUI": "",
+      "LuaScript": "",
+      "Description": "Innsmouth.",
+      "GMNotes": "{\n  \"id\": \"07066\",\n  \"type\": \"Location\",\n  \"traits\": \"Innsmouth.\",\n  \"cycle\": \"Standalone\",\n  \"locationFront\": {\n    \"icons\": \"Crescent\",\n    \"connections\": \"Circle|Hourglass|SlantedEquals|Heart\"\n  },\n  \"locationBack\": {\n    \"icons\": \"Crescent\",\n    \"connections\": \"Circle|Hourglass|SlantedEquals|Heart\",\n    \"uses\": [\n      {\n        \"countPerInvestigator\": 2,\n        \"type\": \"Clue\",\n        \"token\": \"clue\"\n      }\n    ]\n  }\n}",
+      "Grid": true,
+      "Autoraise": true,
+      "HideWhenFaceDown": false,
+      "Snap": true,
+      "Name": "Card",
+      "LuaScriptState": "",
+      "Locked": false,
+      "MeasureMovement": false,
+      "CustomDeck": {
+        "3699": {
+          "NumWidth": 10,
+          "BackIsHidden": true,
+          "Type": 0,
+          "UniqueBack": true,
+          "NumHeight": 7,
+          "FaceURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668361/FA5D994677EFCA86F66F88600DE43822F8E1D9F8/",
+          "BackURL": "http://cloud-3.steamusercontent.com/ugc/1626320664132668810/B3C31810E9ADA30EAD9F56966F011C00694267D0/"
+        }
+      },
+      "Tags": [
+        "Location",
+        "ScenarioCard"
+      ],
+      "Nickname": "Innsmouth Harbour",
+      "GridProjection": false,
+      "Hands": true,
+      "LayoutGroupSortIndex": 0,
+      "SidewaysCard": false,
+      "Tooltip": true,
+      "GUID": "e8fcf0",
+      "ColorDiffuse": {
+        "r": 0.713235259,
+        "b": 0.713235259,
+        "g": 0.713235259
+      },
+      "CardID": 369922,
+      "DragSelectable": true,
+      "IgnoreFoW": false,
+      "Value": 0,
+      "Transform": {
+        "posX": -30.2243,
+        "scaleX": 1.0,
+        "posY": 1.63271511,
+        "scaleY": 1.0,
+        "posZ": -15.28,
+        "rotX": 359.9201,
+        "rotZ": 0.0168397427,
+        "rotY": 269.9999,
+        "scaleZ": 1.0
+      },
+      "Sticky": true
+    }
+  ],
+  "DragSelectable": true,
+  "IgnoreFoW": false,
+  "Value": 0,
+  "Transform": {
+    "posX": 18.5269375,
+    "scaleX": 2.21,
+    "posY": 1.45664012,
+    "scaleY": 0.46,
+    "posZ": 3.257885,
+    "rotX": 359.920135,
+    "rotZ": 0.0168719441,
+    "rotY": 270.001434,
+    "scaleZ": 2.42
+  },
+  "Sticky": true
+}
