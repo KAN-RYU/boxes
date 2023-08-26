@@ -12,9 +12,9 @@ if __name__ == "__main__":
         try:
             with open(f'./{kor}.json', encoding='utf-8') as korJSON:
                 data = json.load(korJSON)
-                newData = data["ObjectStates"]
-                with open(f'./{eng}.json', 'w') as newJSON:
-                    json.dump(newData, newJSON)
+                newData = data["ObjectStates"][0]
+                with open(f'./{eng}.json', 'w', encoding='utf-8') as newJSON:
+                    json.dump(newData, newJSON, ensure_ascii=False, indent=2)
         except Exception as e:
             print(e)
             pass
