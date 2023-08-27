@@ -6,6 +6,7 @@ innsmouth_conspiracy,인스머스에 드리운 음모
 night_of_the_zealot,광신도의 밤
 path_to_carcosa,카르코사로 가는 길
 return_to_notz,돌아온 광신도의 밤
-return_to_tdl,돌아온 끝맺지 못한 의식
+return_to_tdl,돌아온 던위치의 유산
+return_to_tcu,돌아온 끝맺지 못한 의식
 return_to_tfa,돌아온 잊힌 시대
 return_to_tptc,돌아온 카르코사로 가는 길
